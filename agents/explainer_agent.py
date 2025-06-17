@@ -12,7 +12,7 @@ class ExplainerAgent:
     def explain(self, sql: str, result: Any) -> str:
         if not sql or sql.strip().lower() in ["none", "null", "", "-- error:"]:
             st.session_state["logs"].append("[ExplainerAgent] No valid SQL to explain.")
-            return "**Explanation:** I couldn't find a query to explain. Please ask a question like 'What is the average fare?'"
+            return "**Explanation:** No recent query found. Try asking something like 'Show total fare by payment type.'"
         prompt = f"""
 You are a helpful data analyst. Given the following SQL query and its result, do two things:
 1. Briefly describe in plain English what the query is doing (e.g., 'This query finds the vendor with the most customers.').

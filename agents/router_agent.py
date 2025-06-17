@@ -22,5 +22,5 @@ class RouterAgent:
             if any(word in q for word in keywords):
                 st.session_state["logs"].append(f"[RouterAgent] classified intent as: {intent}")
                 return intent
-        st.session_state["logs"].append("[RouterAgent] Fallback: classified as explainer")
-        return 'explainer'
+        st.session_state["logs"].append("[RouterAgent] Fallback: classified as sql")
+        return 'sql'

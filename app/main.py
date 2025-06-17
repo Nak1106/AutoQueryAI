@@ -140,6 +140,7 @@ with tabs[0]:
             explainer_agent = ExplainerAgent(llm, model_type)
             chart_agent = ChartAgent(llm, model_type)
             intent = router.route(user_input)
+            st.toast(f"Routed to {intent.capitalize()} Agent", icon="🧠")
             with st.spinner("Thinking..."):
                 try:
                     assistant_msg = {
@@ -155,7 +156,6 @@ with tabs[0]:
                         assistant_msg['sql'] = sql_query
                         assistant_msg['result'] = result_df.head()
                         assistant_msg['explanation'] = explanation
-                        # Chart if needed
                         if chart_agent.wants_chart(user_input):
                             chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
                             try:
@@ -194,7 +194,9 @@ with tabs[0]:
                     else:
                         assistant_msg['type'] = 'error'
                         assistant_msg['content'] = str(intent)
-                    st.session_state.chat_history.append(assistant_msg)
+                    # Only append if there is content
+                    if assistant_msg.get('sql') or assistant_msg.get('explanation') or assistant_msg.get('chart') or assistant_msg.get('chart_error') or assistant_msg.get('profile') or assistant_msg.get('content'):
+                        st.session_state.chat_history.append(assistant_msg)
                 except Exception as e:
                     st.session_state.chat_history.append({
                         'role': 'assistant', 'type': 'error', 'content': f"Error: {e}", 'timestamp': now, 'message_id': msg_id
@@ -256,8 +258,8 @@ with tabs[0]:
                         st.markdown(f"Data Profile")
                         st.json(assistant_msg['profile'])
                     elif t == 'explanation':
-                        # Fallback: if no previous valid SQL, show a friendly message
-                        if not assistant_msg.get('explanation') or 'couldn' in assistant_msg.get('explanation','').lower():
+                        # Fallback: if no recent valid SQL, show a friendly message
+                        if not assistant_msg.get('explanation') or 'no recent query' in assistant_msg.get('explanation','').lower():
                             st.markdown("**Explanation:** No recent query found. Try asking something like 'What is the average fare?' or 'Show the highest tip.'")
                         else:
                             st.markdown(f"Explanation")
@@ -266,6 +268,10 @@ with tabs[0]:
                     elif t == 'error':
                         st.markdown(f"Error")
                         st.warning(assistant_msg.get('content', 'Unknown error occurred.'))
+# --- Route Log Expander ---
+with st.expander("Routing & Classification Log", expanded=False):
+    for log in st.session_state.logs:
+        st.markdown(log)
 # --- Chat History Expander in Sidebar ---
 with st.sidebar.expander("Chat History", expanded=False):
     for i, msg in enumerate(st.session_state.chat_history):
