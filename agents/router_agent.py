@@ -6,12 +6,13 @@ import streamlit as st
 
 class RouterAgent:
     def __init__(self):
+        # Prioritize metric/numeric/SQL keywords above explainer
         self.intent_keywords = [
+            (['highest', 'lowest', 'average', 'sum', 'max', 'min', 'total', 'count', 'fare', 'distance'], 'sql'),
             (['null', 'missing', 'outlier'], 'profiler'),
             (['overview', 'summary', 'describe'], 'profiler'),
-            (['what is', 'explain', 'meaning of'], 'explainer'),
             (['chart', 'plot', 'visualize', 'bar', 'line'], 'chart'),
-            (['show', 'top', 'most', 'sum', 'count', 'group by', 'highest', 'lowest', 'average', 'minimum', 'maximum', 'min', 'max', 'largest', 'smallest', 'biggest', 'least', 'greatest', 'common', 'compare', 'by payment type'], 'sql'),
+            (['what is', 'explain', 'meaning of'], 'explainer'),
         ]
 
     def route(self, question: str) -> str:
@@ -21,9 +22,5 @@ class RouterAgent:
             if any(word in q for word in keywords):
                 st.session_state["logs"].append(f"[RouterAgent] classified intent as: {intent}")
                 return intent
-        # Fallback: if question structure involves grouping/metric analysis, classify as sql
-        if ' by ' in q or 'compare' in q or 'average' in q or 'sum' in q:
-            st.session_state["logs"].append("[RouterAgent] Fallback: classified as sql (group/metric)")
-            return 'sql'
-        st.session_state["logs"].append("[RouterAgent] Fallback: classified as sql")
-        return 'sql'
+        st.session_state["logs"].append("[RouterAgent] Fallback: classified as explainer")
+        return 'explainer'

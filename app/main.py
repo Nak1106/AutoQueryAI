@@ -221,6 +221,12 @@ with tabs[0]:
             with st.chat_message('user'):
                 st.markdown(f"**{idx+1}.** {user_msg['content']}  \n*{user_msg['timestamp']}*")
             if assistant_msg:
+                # Only render if there is actual content
+                has_content = (
+                    assistant_msg.get('sql') or assistant_msg.get('explanation') or assistant_msg.get('chart') or assistant_msg.get('chart_error') or assistant_msg.get('profile') or assistant_msg.get('content')
+                )
+                if not has_content:
+                    continue
                 with st.chat_message('assistant'):
                     st.subheader(f"Response {idx+1}")
                     t = assistant_msg.get('type')
@@ -250,12 +256,16 @@ with tabs[0]:
                         st.markdown(f"Data Profile")
                         st.json(assistant_msg['profile'])
                     elif t == 'explanation':
-                        st.markdown(f"Explanation")
-                        st.markdown(assistant_msg['explanation'])
-                        st.toast("Explanation generated!", icon="💡")
+                        # Fallback: if no previous valid SQL, show a friendly message
+                        if not assistant_msg.get('explanation') or 'couldn' in assistant_msg.get('explanation','').lower():
+                            st.markdown("**Explanation:** No recent query found. Try asking something like 'What is the average fare?' or 'Show the highest tip.'")
+                        else:
+                            st.markdown(f"Explanation")
+                            st.markdown(assistant_msg['explanation'])
+                            st.toast("Explanation generated!", icon="💡")
                     elif t == 'error':
                         st.markdown(f"Error")
-                        st.warning(assistant_msg.get('content', 'Unknown error'))
+                        st.warning(assistant_msg.get('content', 'Unknown error occurred.'))
 # --- Chat History Expander in Sidebar ---
 with st.sidebar.expander("Chat History", expanded=False):
     for i, msg in enumerate(st.session_state.chat_history):
