@@ -1,0 +1,15 @@
+streamlit
+pandas
+duckdb
+sqlalchemy
+langchain
+eralchemy
+pandas-profiling
+faiss-cpu
+openai
+python-dotenv
+matplotlib
+plotly
+pyyaml
+watchdog
+pytest

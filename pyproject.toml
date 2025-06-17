@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autoqueryai"
+version = "0.1.0"
+description = "LLM-powered data analytics assistant"
+authors = [
+    {name = "Your Name", email = "your@email.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit",
+    "pandas",
+    "duckdb",
+    "sqlalchemy",
+    "langchain",
+    "eralchemy",
+    "pandas-profiling",
+    "faiss-cpu",
+    "openai",
+    "python-dotenv",
+    "matplotlib",
+    "plotly",
+    "pyyaml",
+    "watchdog"
+]
