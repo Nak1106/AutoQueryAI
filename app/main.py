@@ -71,13 +71,11 @@ else:
 uploaded_file = st.sidebar.file_uploader("Upload CSV, Excel, JSON, or SQL", type=["csv", "xlsx", "xls", "json", "sql"])
 
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []  # List of dicts: {role, type, content, timestamp}
-if 'df' not in st.session_state:
-    st.session_state.df = None
-if 'schema' not in st.session_state:
-    st.session_state.schema = None
+    st.session_state.chat_history = []  # List of dicts: {role, type, content, timestamp, message_id}
 if 'logs' not in st.session_state:
     st.session_state.logs = []
+if 'message_id_counter' not in st.session_state:
+    st.session_state.message_id_counter = 0
 
 # --- File parsing and schema extraction ---
 if uploaded_file:
@@ -131,9 +129,11 @@ with tabs[0]:
         user_input = st.chat_input("Ask a question about your data...")
         if user_input:
             now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            st.session_state.message_id_counter += 1
+            msg_id = st.session_state.message_id_counter
             # Add user message
             st.session_state.chat_history.append({
-                'role': 'user', 'type': 'query', 'content': user_input, 'timestamp': now
+                'role': 'user', 'type': 'query', 'content': user_input, 'timestamp': now, 'message_id': msg_id
             })
             llm = get_llm(model_type, model_key)
             sql_agent = SQLAgent(llm, model_type)
@@ -142,18 +142,19 @@ with tabs[0]:
             intent = router.route(user_input)
             with st.spinner("Thinking..."):
                 try:
+                    assistant_msg = {
+                        'role': 'assistant',
+                        'type': 'query',
+                        'timestamp': now,
+                        'message_id': msg_id
+                    }
                     if intent == 'sql':
                         sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history)
                         result_df = execute_sql(st.session_state.df, sql_query)
                         explanation = explainer_agent.explain(sql_query, result_df.head())
-                        msg = {
-                            'role': 'assistant',
-                            'type': 'query',
-                            'sql': sql_query,
-                            'result': result_df.head(),
-                            'explanation': explanation,
-                            'timestamp': now
-                        }
+                        assistant_msg['sql'] = sql_query
+                        assistant_msg['result'] = result_df.head()
+                        assistant_msg['explanation'] = explanation
                         # Chart if needed
                         if chart_agent.wants_chart(user_input):
                             chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
@@ -162,10 +163,9 @@ with tabs[0]:
                                 exec(chart_code, {}, local_vars)
                                 fig = local_vars.get('fig', None)
                                 if fig is not None:
-                                    msg['chart'] = fig
+                                    assistant_msg['chart'] = fig
                             except Exception as e:
-                                msg['chart_error'] = str(e)
-                        st.session_state.chat_history.append(msg)
+                                assistant_msg['chart_error'] = str(e)
                         st.toast("Query complete!", icon="✅")
                     elif intent == 'chart':
                         chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
@@ -173,18 +173,15 @@ with tabs[0]:
                             local_vars = {'result_df': st.session_state.df.copy()}
                             exec(chart_code, {}, local_vars)
                             fig = local_vars.get('fig', None)
-                            st.session_state.chat_history.append({
-                                'role': 'assistant', 'type': 'plot', 'chart': fig, 'timestamp': now
-                            })
+                            assistant_msg['type'] = 'plot'
+                            assistant_msg['chart'] = fig
                         except Exception as e:
-                            st.session_state.chat_history.append({
-                                'role': 'assistant', 'type': 'plot', 'chart_error': str(e), 'timestamp': now
-                            })
+                            assistant_msg['type'] = 'plot'
+                            assistant_msg['chart_error'] = str(e)
                     elif intent == 'profiler':
                         profile = generate_profile(st.session_state.df)
-                        st.session_state.chat_history.append({
-                            'role': 'assistant', 'type': 'profile', 'profile': profile, 'timestamp': now
-                        })
+                        assistant_msg['type'] = 'profile'
+                        assistant_msg['profile'] = profile
                     elif intent == 'explainer':
                         sql_query = ""
                         for msg in reversed(st.session_state.chat_history):
@@ -192,58 +189,73 @@ with tabs[0]:
                                 sql_query = msg['sql']
                                 break
                         explanation = explainer_agent.explain(sql_query, st.session_state.df.head())
-                        st.session_state.chat_history.append({
-                            'role': 'assistant', 'type': 'explanation', 'explanation': explanation, 'timestamp': now
-                        })
+                        assistant_msg['type'] = 'explanation'
+                        assistant_msg['explanation'] = explanation
                     else:
-                        st.session_state.chat_history.append({
-                            'role': 'assistant', 'type': 'error', 'content': str(intent), 'timestamp': now
-                        })
+                        assistant_msg['type'] = 'error'
+                        assistant_msg['content'] = str(intent)
+                    st.session_state.chat_history.append(assistant_msg)
                 except Exception as e:
                     st.session_state.chat_history.append({
-                        'role': 'assistant', 'type': 'error', 'content': f"Error: {e}", 'timestamp': now
+                        'role': 'assistant', 'type': 'error', 'content': f"Error: {e}", 'timestamp': now, 'message_id': msg_id
                     })
                     st.toast(f"Query failed: {e}", icon="❌")
-        # Render chat history stack
-        for i, msg in enumerate(st.session_state.chat_history):
+        # Render chat history stack, grouping by message_id (user+assistant)
+        grouped_msgs = []
+        i = 0
+        while i < len(st.session_state.chat_history):
+            msg = st.session_state.chat_history[i]
             if msg['role'] == 'user':
-                with st.chat_message('user'):
-                    st.markdown(f"**{i+1}.** {msg['content']}  \n*{msg['timestamp']}*")
-            elif msg['role'] == 'assistant':
+                # Find the next assistant with same message_id
+                user_msg = msg
+                assistant_msg = None
+                for j in range(i+1, len(st.session_state.chat_history)):
+                    if st.session_state.chat_history[j]['role'] == 'assistant' and st.session_state.chat_history[j]['message_id'] == msg['message_id']:
+                        assistant_msg = st.session_state.chat_history[j]
+                        break
+                grouped_msgs.append((user_msg, assistant_msg))
+                i = j+1 if assistant_msg else i+1
+            else:
+                i += 1
+        for idx, (user_msg, assistant_msg) in enumerate(grouped_msgs):
+            with st.chat_message('user'):
+                st.markdown(f"**{idx+1}.** {user_msg['content']}  \n*{user_msg['timestamp']}*")
+            if assistant_msg:
                 with st.chat_message('assistant'):
-                    st.subheader(f"Response {i+1}")
-                    if msg['type'] == 'query':
-                        st.markdown("**SQL Query:**")
-                        st.code(msg['sql'], language='sql')
-                        st.markdown("**Result:**")
-                        st.dataframe(msg['result'])
-                        st.markdown("**Explanation:**")
-                        st.markdown(msg['explanation'])
-                        st.toast("Explanation generated!", icon="💡")
-                        if msg.get('chart'):
+                    st.subheader(f"Response {idx+1}")
+                    t = assistant_msg.get('type')
+                    if t == 'query':
+                        if assistant_msg.get('sql'):
+                            st.markdown("**SQL Query:**")
+                            st.code(assistant_msg['sql'], language='sql')
+                        if assistant_msg.get('result') is not None:
+                            st.markdown("**Result:**")
+                            st.dataframe(assistant_msg['result'])
+                        if assistant_msg.get('explanation'):
+                            st.markdown("**Explanation:**")
+                            st.markdown(assistant_msg['explanation'])
+                            st.toast("Explanation generated!", icon="💡")
+                        if assistant_msg.get('chart'):
                             st.markdown("**Chart:**")
-                            st.plotly_chart(msg['chart'], use_container_width=True)
-                        if msg.get('chart_error'):
-                            st.warning(f"Chart error: {msg['chart_error']}")
-                    elif msg['type'] == 'plot':
+                            st.plotly_chart(assistant_msg['chart'], use_container_width=True)
+                        if assistant_msg.get('chart_error'):
+                            st.warning(f"Chart error: {assistant_msg['chart_error']}")
+                    elif t == 'plot':
                         st.markdown(f"Chart")
-                        if msg.get('chart'):
-                            st.plotly_chart(msg['chart'], use_container_width=True)
-                        if msg.get('chart_error'):
-                            st.warning(f"Chart error: {msg['chart_error']}")
-                    elif msg['type'] == 'profile':
+                        if assistant_msg.get('chart'):
+                            st.plotly_chart(assistant_msg['chart'], use_container_width=True)
+                        if assistant_msg.get('chart_error'):
+                            st.warning(f"Chart error: {assistant_msg['chart_error']}")
+                    elif t == 'profile':
                         st.markdown(f"Data Profile")
-                        st.json(msg['profile'])
-                    elif msg['type'] == 'explanation':
+                        st.json(assistant_msg['profile'])
+                    elif t == 'explanation':
                         st.markdown(f"Explanation")
-                        st.markdown(msg['explanation'])
+                        st.markdown(assistant_msg['explanation'])
                         st.toast("Explanation generated!", icon="💡")
-                    elif msg['type'] == 'error':
+                    elif t == 'error':
                         st.markdown(f"Error")
-                        st.warning(msg['content'])
-    else:
-        st.info("Upload a file to start chatting.")
-
+                        st.warning(assistant_msg.get('content', 'Unknown error'))
 # --- Chat History Expander in Sidebar ---
 with st.sidebar.expander("Chat History", expanded=False):
     for i, msg in enumerate(st.session_state.chat_history):
