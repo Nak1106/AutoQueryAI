@@ -14,7 +14,13 @@ class ExplainerAgent:
             st.session_state["logs"].append("[ExplainerAgent] No valid SQL to explain.")
             return "I didn't receive a valid query to explain. Please try rephrasing your question."
         prompt = f"""
-You are a helpful data analyst. Explain in simple terms what the following SQL query does and summarize the result for a business user.
+You are a helpful data analyst. Given the following SQL query and its result, do two things:
+1. Briefly describe in plain English what the query is doing (e.g., 'This query finds the vendor with the most customers.').
+2. Provide a one-line business insight from the result (e.g., 'Vendor 2 received the highest number of customers: 88,327.').
+
+Format your answer as:
+**Query Description:** <description>
+**Business Insight:** <insight>
 
 SQL Query:
 {sql}
@@ -32,6 +38,6 @@ Explanation:
             response = self.llm(prompt, max_new_tokens=128, return_full_text=False)
             explanation = response[0]['generated_text'] if isinstance(response, list) else str(response)
         else:
-            explanation = "This query selects the first few rows from the data."
+            explanation = "No explanation available."
         st.session_state["logs"].append(f"[ExplainerAgent] Response:\n{explanation}")
         return explanation.strip()

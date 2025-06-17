@@ -1,5 +1,6 @@
 import sys
 import os
+import datetime
 
 # Add project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,7 +71,7 @@ else:
 uploaded_file = st.sidebar.file_uploader("Upload CSV, Excel, JSON, or SQL", type=["csv", "xlsx", "xls", "json", "sql"])
 
 if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = ChatHistory()
+    st.session_state.chat_history = []  # List of dicts: {role, type, content, timestamp}
 if 'df' not in st.session_state:
     st.session_state.df = None
 if 'schema' not in st.session_state:
@@ -129,109 +130,134 @@ with tabs[0]:
         router = RouterAgent()
         user_input = st.chat_input("Ask a question about your data...")
         if user_input:
-            # Render user message immediately
-            with st.chat_message("user"):
-                st.markdown(user_input)
-            st.session_state.chat_history.add_message('user', user_input)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Add user message
+            st.session_state.chat_history.append({
+                'role': 'user', 'type': 'query', 'content': user_input, 'timestamp': now
+            })
             llm = get_llm(model_type, model_key)
             sql_agent = SQLAgent(llm, model_type)
             explainer_agent = ExplainerAgent(llm, model_type)
             chart_agent = ChartAgent(llm, model_type)
-            # Route the question
             intent = router.route(user_input)
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        if intent == 'sql':
-                            sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history.get_history())
-                            st.session_state.logs.append(f"Generated SQL: {sql_query}")
-                            result_df = execute_sql(st.session_state.df, sql_query)
-                            st.markdown(f"**SQL Query:**\n```sql\n{sql_query}\n```")
-                            st.dataframe(result_df)
-                            # CSV export
-                            csv = result_df.to_csv(index=False).encode('utf-8')
-                            st.download_button("Download CSV", csv, "result.csv", "text/csv")
-                            # Explanation
-                            explanation = explainer_agent.explain(sql_query, result_df.head())
-                            st.markdown(f"**Explanation:**\n{explanation}")
-                            # Chart if needed
-                            if chart_agent.wants_chart(user_input):
-                                chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
-                                try:
-                                    local_vars = {'result_df': result_df.copy()}
-                                    exec(chart_code, {}, local_vars)
-                                    fig = local_vars.get('fig', None)
-                                    if fig is not None:
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        buf = io.BytesIO()
-                                        pio.write_image(fig, buf, format='png')
-                                        st.download_button("Download Chart as PNG", buf.getvalue(), "chart.png", "image/png")
-                                except Exception as e:
-                                    st.warning(f"Chart rendering failed: {e}")
-                        elif intent == 'chart':
-                            chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
+            with st.spinner("Thinking..."):
+                try:
+                    if intent == 'sql':
+                        sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history)
+                        result_df = execute_sql(st.session_state.df, sql_query)
+                        explanation = explainer_agent.explain(sql_query, result_df.head())
+                        msg = {
+                            'role': 'assistant',
+                            'type': 'query',
+                            'sql': sql_query,
+                            'result': result_df.head(),
+                            'explanation': explanation,
+                            'timestamp': now
+                        }
+                        # Chart if needed
+                        if chart_agent.wants_chart(user_input):
+                            chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
                             try:
-                                local_vars = {'result_df': st.session_state.df.copy()}
+                                local_vars = {'result_df': result_df.copy()}
                                 exec(chart_code, {}, local_vars)
                                 fig = local_vars.get('fig', None)
                                 if fig is not None:
-                                    st.plotly_chart(fig, use_container_width=True)
-                                    buf = io.BytesIO()
-                                    pio.write_image(fig, buf, format='png')
-                                    st.download_button("Download Chart as PNG", buf.getvalue(), "chart.png", "image/png")
+                                    msg['chart'] = fig
                             except Exception as e:
-                                st.warning(f"Chart rendering failed: {e}")
-                        elif intent == 'profiler':
-                            profile = generate_profile(st.session_state.df)
-                            st.json(profile)
-                        elif intent == 'explainer':
-                            sql_query = ""
-                            # Try to extract SQL from chat history if possible
-                            for msg in reversed(st.session_state.chat_history.get_history()):
-                                if msg['role'] == 'assistant' and 'SQL Query:' in msg['content']:
-                                    sql_query = msg['content'].split('SQL Query:')[-1].strip().strip('`')
-                                    break
-                            explanation = explainer_agent.explain(sql_query, st.session_state.df.head())
-                            if not sql_query or not sql_query.strip() or "valid query" in explanation:
-                                # Correction: retry as SQL
-                                st.session_state.logs.append("[IntentCorrection] Explainer intent with no SQL, retrying as SQL.")
-                                sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history.get_history())
-                                st.session_state.logs.append(f"[IntentCorrection] Reclassified and generated SQL: {sql_query}")
-                                if sql_query and sql_query.strip() and not sql_query.startswith('-- Error'):
-                                    result_df = execute_sql(st.session_state.df, sql_query)
-                                    st.markdown(f"**SQL Query:**\n```sql\n{sql_query}\n```")
-                                    st.dataframe(result_df)
-                                    explanation = explainer_agent.explain(sql_query, result_df.head())
-                                    st.markdown(f"**Explanation:**\n{explanation}")
-                                else:
-                                    st.warning("Sorry, I couldn't generate a valid query for your question. Try rephrasing or ask for a summary or chart.")
-                            else:
-                                st.markdown("**Dataset Overview:**")
-                                st.markdown(explanation)
-                        else:
-                            st.warning(str(intent))
+                                msg['chart_error'] = str(e)
+                        st.session_state.chat_history.append(msg)
                         st.toast("Query complete!", icon="✅")
-                    except Exception as e:
-                        st.session_state.chat_history.add_message('assistant', f"Error: {e}")
-                        st.error(f"Error: {e}")
-                        st.toast(f"Query failed: {e}", icon="❌")
-            st.session_state.chat_history.add_message('assistant', 'See above for results.')
-        # Render chat history (user/assistant) for previous turns
-        for msg in st.session_state.chat_history.get_history():
+                    elif intent == 'chart':
+                        chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
+                        try:
+                            local_vars = {'result_df': st.session_state.df.copy()}
+                            exec(chart_code, {}, local_vars)
+                            fig = local_vars.get('fig', None)
+                            st.session_state.chat_history.append({
+                                'role': 'assistant', 'type': 'plot', 'chart': fig, 'timestamp': now
+                            })
+                        except Exception as e:
+                            st.session_state.chat_history.append({
+                                'role': 'assistant', 'type': 'plot', 'chart_error': str(e), 'timestamp': now
+                            })
+                    elif intent == 'profiler':
+                        profile = generate_profile(st.session_state.df)
+                        st.session_state.chat_history.append({
+                            'role': 'assistant', 'type': 'profile', 'profile': profile, 'timestamp': now
+                        })
+                    elif intent == 'explainer':
+                        sql_query = ""
+                        for msg in reversed(st.session_state.chat_history):
+                            if msg['role'] == 'assistant' and msg.get('sql'):
+                                sql_query = msg['sql']
+                                break
+                        explanation = explainer_agent.explain(sql_query, st.session_state.df.head())
+                        st.session_state.chat_history.append({
+                            'role': 'assistant', 'type': 'explanation', 'explanation': explanation, 'timestamp': now
+                        })
+                    else:
+                        st.session_state.chat_history.append({
+                            'role': 'assistant', 'type': 'error', 'content': str(intent), 'timestamp': now
+                        })
+                except Exception as e:
+                    st.session_state.chat_history.append({
+                        'role': 'assistant', 'type': 'error', 'content': f"Error: {e}", 'timestamp': now
+                    })
+                    st.toast(f"Query failed: {e}", icon="❌")
+        # Render chat history stack
+        for i, msg in enumerate(st.session_state.chat_history):
             if msg['role'] == 'user':
                 with st.chat_message('user'):
-                    st.markdown(msg['content'])
+                    st.markdown(f"**{i+1}.** {msg['content']}  \n*{msg['timestamp']}*")
             elif msg['role'] == 'assistant':
                 with st.chat_message('assistant'):
-                    st.markdown(msg['content'])
+                    if msg['type'] == 'query':
+                        st.markdown(f"**{i+1}.**")
+                        st.markdown("**SQL Query:**")
+                        st.code(msg['sql'], language='sql')
+                        st.markdown("**Result:**")
+                        st.dataframe(msg['result'])
+                        st.markdown("**Explanation:**")
+                        st.markdown(msg['explanation'])
+                        if msg.get('chart'):
+                            st.markdown("**Chart:**")
+                            st.plotly_chart(msg['chart'], use_container_width=True)
+                        if msg.get('chart_error'):
+                            st.warning(f"Chart error: {msg['chart_error']}")
+                    elif msg['type'] == 'plot':
+                        st.markdown(f"**{i+1}.** Chart")
+                        if msg.get('chart'):
+                            st.plotly_chart(msg['chart'], use_container_width=True)
+                        if msg.get('chart_error'):
+                            st.warning(f"Chart error: {msg['chart_error']}")
+                    elif msg['type'] == 'profile':
+                        st.markdown(f"**{i+1}.** Data Profile")
+                        st.json(msg['profile'])
+                    elif msg['type'] == 'explanation':
+                        st.markdown(f"**{i+1}.** Explanation")
+                        st.markdown(msg['explanation'])
+                    elif msg['type'] == 'error':
+                        st.markdown(f"**{i+1}.** Error")
+                        st.warning(msg['content'])
     else:
         st.info("Upload a file to start chatting.")
 
 # --- Chat History Expander in Sidebar ---
 with st.sidebar.expander("Chat History", expanded=False):
-    for msg in st.session_state.chat_history.get_history():
-        st.markdown(f"**{msg['role'].capitalize()}:** {msg['content']}")
-
+    for i, msg in enumerate(st.session_state.chat_history):
+        if msg['role'] == 'user':
+            st.markdown(f"**{i+1}. User:** {msg['content']}  \n*{msg['timestamp']}*")
+        elif msg['role'] == 'assistant':
+            if msg['type'] == 'query':
+                st.markdown(f"**{i+1}. Assistant (Query):** SQL: `{msg['sql']}`  \n*{msg['timestamp']}*")
+            elif msg['type'] == 'plot':
+                st.markdown(f"**{i+1}. Assistant (Chart):** Chart  \n*{msg['timestamp']}*")
+            elif msg['type'] == 'profile':
+                st.markdown(f"**{i+1}. Assistant (Profile):** Data Profile  \n*{msg['timestamp']}*")
+            elif msg['type'] == 'explanation':
+                st.markdown(f"**{i+1}. Assistant (Explanation):** {msg['explanation']}  \n*{msg['timestamp']}*")
+            elif msg['type'] == 'error':
+                st.markdown(f"**{i+1}. Assistant (Error):** {msg['content']}  \n*{msg['timestamp']}*")
 # --- Debug Tab ---
 with tabs[3]:
     st.subheader("Debug / Logs")
