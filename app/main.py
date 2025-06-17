@@ -185,8 +185,29 @@ with tabs[0]:
                             profile = generate_profile(st.session_state.df)
                             st.json(profile)
                         elif intent == 'explainer':
-                            st.markdown("**Dataset Overview:**")
-                            st.markdown(explainer_agent.explain("", st.session_state.df.head()))
+                            sql_query = ""
+                            # Try to extract SQL from chat history if possible
+                            for msg in reversed(st.session_state.chat_history.get_history()):
+                                if msg['role'] == 'assistant' and 'SQL Query:' in msg['content']:
+                                    sql_query = msg['content'].split('SQL Query:')[-1].strip().strip('`')
+                                    break
+                            explanation = explainer_agent.explain(sql_query, st.session_state.df.head())
+                            if not sql_query or not sql_query.strip() or "valid query" in explanation:
+                                # Correction: retry as SQL
+                                st.session_state.logs.append("[IntentCorrection] Explainer intent with no SQL, retrying as SQL.")
+                                sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history.get_history())
+                                st.session_state.logs.append(f"[IntentCorrection] Reclassified and generated SQL: {sql_query}")
+                                if sql_query and sql_query.strip() and not sql_query.startswith('-- Error'):
+                                    result_df = execute_sql(st.session_state.df, sql_query)
+                                    st.markdown(f"**SQL Query:**\n```sql\n{sql_query}\n```")
+                                    st.dataframe(result_df)
+                                    explanation = explainer_agent.explain(sql_query, result_df.head())
+                                    st.markdown(f"**Explanation:**\n{explanation}")
+                                else:
+                                    st.warning("Sorry, I couldn't generate a valid query for your question. Try rephrasing or ask for a summary or chart.")
+                            else:
+                                st.markdown("**Dataset Overview:**")
+                                st.markdown(explanation)
                         else:
                             st.warning(str(intent))
                         st.toast("Query complete!", icon="✅")

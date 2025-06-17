@@ -10,6 +10,9 @@ class ExplainerAgent:
         self.model_type = model_type
 
     def explain(self, sql: str, result: Any) -> str:
+        if not sql or not sql.strip() or sql.strip().lower() in ["none", "null", "", "-- error:"]:
+            st.session_state["logs"].append("[ExplainerAgent] No valid SQL to explain.")
+            return "I didn't receive a valid query to explain. Please try rephrasing your question."
         prompt = f"""
 You are a helpful data analyst. Explain in simple terms what the following SQL query does and summarize the result for a business user.
 
