@@ -17,6 +17,7 @@ from utils.profiling import generate_profile_report
 from agents.sql_agent import SQLAgent
 from agents.explainer_agent import ExplainerAgent
 from agents.chart_agent import ChartAgent
+from agents.router_agent import RouterAgent
 from core.query_executor import execute_sql, execute_pandas_code
 from models.chat_history import ChatHistory
 from config.model_config import MODELS, get_model_key
@@ -125,55 +126,90 @@ with tabs[2]:
 with tabs[0]:
     st.subheader("Chat with your data")
     if st.session_state.df is not None:
-        for msg in st.session_state.chat_history.get_history():
-            with st.chat_message(msg['role']):
-                st.markdown(msg['content'])
+        router = RouterAgent()
         user_input = st.chat_input("Ask a question about your data...")
         if user_input:
+            # Render user message immediately
+            with st.chat_message("user"):
+                st.markdown(user_input)
             st.session_state.chat_history.add_message('user', user_input)
             llm = get_llm(model_type, model_key)
             sql_agent = SQLAgent(llm, model_type)
             explainer_agent = ExplainerAgent(llm, model_type)
             chart_agent = ChartAgent(llm, model_type)
-            with st.spinner("Generating SQL query..."):
-                sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history.get_history())
-            st.session_state.logs.append(f"Generated SQL: {sql_query}")
-            try:
-                with st.spinner("Running query..."):
-                    result_df = execute_sql(st.session_state.df, sql_query)
-                st.session_state.chat_history.add_message('assistant', f"SQL Query:\n```sql\n{sql_query}\n```")
-                st.session_state.chat_history.add_message('assistant', f"Result:\n{result_df.head().to_markdown(index=False)}")
-                st.dataframe(result_df)
-                # CSV export
-                csv = result_df.to_csv(index=False).encode('utf-8')
-                st.download_button("Download CSV", csv, "result.csv", "text/csv")
-                # Explanation
-                with st.spinner("Explaining result..."):
-                    explanation = explainer_agent.explain(sql_query, result_df.head())
-                st.markdown(f"**Explanation:**\n{explanation}")
-                # Chart
-                if chart_agent.wants_chart(user_input):
-                    with st.spinner("Generating chart..."):
-                        chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
+            # Route the question
+            intent = router.route(user_input)
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
                     try:
-                        local_vars = {'result_df': result_df.copy()}
-                        exec(chart_code, {}, local_vars)
-                        fig = local_vars.get('fig', None)
-                        if fig is not None:
-                            st.plotly_chart(fig, use_container_width=True)
-                            # PNG export
-                            buf = io.BytesIO()
-                            pio.write_image(fig, buf, format='png')
-                            st.download_button("Download Chart as PNG", buf.getvalue(), "chart.png", "image/png")
+                        if intent == 'sql':
+                            sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history.get_history())
+                            st.session_state.logs.append(f"Generated SQL: {sql_query}")
+                            result_df = execute_sql(st.session_state.df, sql_query)
+                            st.markdown(f"**SQL Query:**\n```sql\n{sql_query}\n```")
+                            st.dataframe(result_df)
+                            # CSV export
+                            csv = result_df.to_csv(index=False).encode('utf-8')
+                            st.download_button("Download CSV", csv, "result.csv", "text/csv")
+                            # Explanation
+                            explanation = explainer_agent.explain(sql_query, result_df.head())
+                            st.markdown(f"**Explanation:**\n{explanation}")
+                            # Chart if needed
+                            if chart_agent.wants_chart(user_input):
+                                chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
+                                try:
+                                    local_vars = {'result_df': result_df.copy()}
+                                    exec(chart_code, {}, local_vars)
+                                    fig = local_vars.get('fig', None)
+                                    if fig is not None:
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        buf = io.BytesIO()
+                                        pio.write_image(fig, buf, format='png')
+                                        st.download_button("Download Chart as PNG", buf.getvalue(), "chart.png", "image/png")
+                                except Exception as e:
+                                    st.warning(f"Chart rendering failed: {e}")
+                        elif intent == 'chart':
+                            chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
+                            try:
+                                local_vars = {'result_df': st.session_state.df.copy()}
+                                exec(chart_code, {}, local_vars)
+                                fig = local_vars.get('fig', None)
+                                if fig is not None:
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    buf = io.BytesIO()
+                                    pio.write_image(fig, buf, format='png')
+                                    st.download_button("Download Chart as PNG", buf.getvalue(), "chart.png", "image/png")
+                            except Exception as e:
+                                st.warning(f"Chart rendering failed: {e}")
+                        elif intent == 'profiler':
+                            profile = generate_profile(st.session_state.df)
+                            st.json(profile)
+                        elif intent == 'explainer':
+                            st.markdown("**Dataset Overview:**")
+                            st.markdown(explainer_agent.explain("", st.session_state.df.head()))
+                        else:
+                            st.warning(str(intent))
+                        st.toast("Query complete!", icon="✅")
                     except Exception as e:
-                        st.warning(f"Chart rendering failed: {e}")
-                st.toast("Query complete!", icon="✅")
-            except Exception as e:
-                st.session_state.chat_history.add_message('assistant', f"Error executing query: {e}")
-                st.error(f"Query error: {e}")
-                st.toast(f"Query failed: {e}", icon="❌")
+                        st.session_state.chat_history.add_message('assistant', f"Error: {e}")
+                        st.error(f"Error: {e}")
+                        st.toast(f"Query failed: {e}", icon="❌")
+            st.session_state.chat_history.add_message('assistant', 'See above for results.')
+        # Render chat history (user/assistant) for previous turns
+        for msg in st.session_state.chat_history.get_history():
+            if msg['role'] == 'user':
+                with st.chat_message('user'):
+                    st.markdown(msg['content'])
+            elif msg['role'] == 'assistant':
+                with st.chat_message('assistant'):
+                    st.markdown(msg['content'])
     else:
         st.info("Upload a file to start chatting.")
+
+# --- Chat History Expander in Sidebar ---
+with st.sidebar.expander("Chat History", expanded=False):
+    for msg in st.session_state.chat_history.get_history():
+        st.markdown(f"**{msg['role'].capitalize()}:** {msg['content']}")
 
 # --- Debug Tab ---
 with tabs[3]:
