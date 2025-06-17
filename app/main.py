@@ -211,33 +211,35 @@ with tabs[0]:
                     st.markdown(f"**{i+1}.** {msg['content']}  \n*{msg['timestamp']}*")
             elif msg['role'] == 'assistant':
                 with st.chat_message('assistant'):
+                    st.subheader(f"Response {i+1}")
                     if msg['type'] == 'query':
-                        st.markdown(f"**{i+1}.**")
                         st.markdown("**SQL Query:**")
                         st.code(msg['sql'], language='sql')
                         st.markdown("**Result:**")
                         st.dataframe(msg['result'])
                         st.markdown("**Explanation:**")
                         st.markdown(msg['explanation'])
+                        st.toast("Explanation generated!", icon="💡")
                         if msg.get('chart'):
                             st.markdown("**Chart:**")
                             st.plotly_chart(msg['chart'], use_container_width=True)
                         if msg.get('chart_error'):
                             st.warning(f"Chart error: {msg['chart_error']}")
                     elif msg['type'] == 'plot':
-                        st.markdown(f"**{i+1}.** Chart")
+                        st.markdown(f"Chart")
                         if msg.get('chart'):
                             st.plotly_chart(msg['chart'], use_container_width=True)
                         if msg.get('chart_error'):
                             st.warning(f"Chart error: {msg['chart_error']}")
                     elif msg['type'] == 'profile':
-                        st.markdown(f"**{i+1}.** Data Profile")
+                        st.markdown(f"Data Profile")
                         st.json(msg['profile'])
                     elif msg['type'] == 'explanation':
-                        st.markdown(f"**{i+1}.** Explanation")
+                        st.markdown(f"Explanation")
                         st.markdown(msg['explanation'])
+                        st.toast("Explanation generated!", icon="💡")
                     elif msg['type'] == 'error':
-                        st.markdown(f"**{i+1}.** Error")
+                        st.markdown(f"Error")
                         st.warning(msg['content'])
     else:
         st.info("Upload a file to start chatting.")

@@ -57,8 +57,7 @@ Chat History:
 Here are some example questions and queries:
 {FEW_SHOT_EXAMPLES}
 
-IMPORTANT: Output ONLY the raw query with NO explanation, markdown, or code blocks. Do NOT wrap in triple backticks or include any commentary.
-Your output must begin directly with a valid {'pandas expression' if prefer_pandas else 'SQL query'}.
+IMPORTANT: Assume the SQL engine is DuckDB. Use EXTRACT(HOUR FROM timestamp) instead of strftime. Output ONLY the raw query with NO explanation, markdown, or code blocks. Do NOT wrap in triple backticks or include any commentary.
 
 Question:
 {question}

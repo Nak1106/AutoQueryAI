@@ -22,6 +22,23 @@ Format your answer as:
 **Query Description:** <description>
 **Business Insight:** <insight>
 
+---
+
+Example:
+SQL Query:
+SELECT vendor_id, SUM(tips) AS total_tips FROM trips GROUP BY vendor_id ORDER BY total_tips DESC LIMIT 1;
+
+Result (first rows):
+| vendor_id | total_tips |
+|-----------|------------|
+| 2         | 16130.50   |
+
+Explanation:
+**Query Description:** This query finds the vendor with the most tips.
+**Business Insight:** Vendor 2 received the most tips: $16,130.50.
+
+---
+
 SQL Query:
 {sql}
 
