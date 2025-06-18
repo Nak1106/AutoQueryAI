@@ -151,27 +151,29 @@ with tabs[0]:
                     }
                     if intent == 'sql':
                         sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history)
-                        result_df = execute_sql(st.session_state.df, sql_query)
-                        assistant_msg['sql'] = sql_query
-                        assistant_msg['result'] = result_df.head() if hasattr(result_df, 'head') else result_df
-                        # Only call explainer if result is valid
-                        if result_df is not None and hasattr(result_df, 'head'):
-                            explanation = explainer_agent.explain(sql_query, result_df)
-                            assistant_msg['explanation'] = explanation
-                            st.toast("Explanation generated ✅", icon="🧠")
+                        if not sql_query or sql_query.strip().lower() in ["none", "null", "", "-- error:"]:
+                            st.toast("No SQL could be generated for this question.", icon="❌")
                         else:
-                            assistant_msg['explanation'] = "**Explanation:** No valid SQL result to summarize."
-                        if chart_agent.wants_chart(user_input):
-                            chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
-                            try:
-                                local_vars = {'result_df': result_df.copy() if hasattr(result_df, 'copy') else result_df}
-                                exec(chart_code, {}, local_vars)
-                                fig = local_vars.get('fig', None)
-                                if fig is not None:
-                                    assistant_msg['chart'] = fig
-                            except Exception as e:
-                                assistant_msg['chart_error'] = str(e)
-                        st.toast("Query complete!", icon="✅")
+                            result_df = execute_sql(st.session_state.df, sql_query)
+                            if result_df is None or not hasattr(result_df, 'head'):
+                                st.toast("No result returned for the SQL query.", icon="❌")
+                            else:
+                                assistant_msg['sql'] = sql_query
+                                assistant_msg['result'] = result_df.head() if hasattr(result_df, 'head') else result_df
+                                explanation = explainer_agent.explain(sql_query, result_df)
+                                assistant_msg['explanation'] = explanation
+                                st.toast("Explanation generated ✅", icon="🧠")
+                                if chart_agent.wants_chart(user_input):
+                                    chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
+                                    try:
+                                        local_vars = {'result_df': result_df.copy() if hasattr(result_df, 'copy') else result_df}
+                                        exec(chart_code, {}, local_vars)
+                                        fig = local_vars.get('fig', None)
+                                        if fig is not None:
+                                            assistant_msg['chart'] = fig
+                                    except Exception as e:
+                                        assistant_msg['chart_error'] = str(e)
+                            st.toast("Query complete!", icon="✅")
                     elif intent == 'chart':
                         chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
                         try:
@@ -188,21 +190,21 @@ with tabs[0]:
                         assistant_msg['type'] = 'profile'
                         assistant_msg['profile'] = profile
                     elif intent == 'explainer':
-                        sql_query = ""
+                        # Only run explainer if last assistant message has valid sql and result
+                        last_sql = None
+                        last_result = None
                         for msg in reversed(st.session_state.chat_history):
-                            if msg['role'] == 'assistant' and msg.get('sql'):
-                                sql_query = msg['sql']
+                            if msg['role'] == 'assistant' and msg.get('sql') and msg.get('result') is not None:
+                                last_sql = msg['sql']
+                                last_result = msg['result']
                                 break
-                        # Only call explainer if result is valid
-                        result = st.session_state.df
-                        if result is not None and hasattr(result, 'head'):
-                            explanation = explainer_agent.explain(sql_query, result)
+                        if not last_sql or last_result is None:
+                            st.toast("No previous SQL query and result to explain.", icon="❌")
+                        else:
+                            explanation = explainer_agent.explain(last_sql, last_result)
                             assistant_msg['type'] = 'explanation'
                             assistant_msg['explanation'] = explanation
                             st.toast("Explanation generated ✅", icon="🧠")
-                        else:
-                            assistant_msg['type'] = 'explanation'
-                            assistant_msg['explanation'] = "**Explanation:** No valid SQL result to summarize."
                     else:
                         assistant_msg['type'] = 'error'
                         assistant_msg['content'] = f"Error: {intent}"
