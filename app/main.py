@@ -152,14 +152,19 @@ with tabs[0]:
                     if intent == 'sql':
                         sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history)
                         result_df = execute_sql(st.session_state.df, sql_query)
-                        explanation = explainer_agent.explain(sql_query, result_df)
                         assistant_msg['sql'] = sql_query
-                        assistant_msg['result'] = result_df.head()
-                        assistant_msg['explanation'] = explanation
+                        assistant_msg['result'] = result_df.head() if hasattr(result_df, 'head') else result_df
+                        # Only call explainer if result is valid
+                        if result_df is not None and hasattr(result_df, 'head'):
+                            explanation = explainer_agent.explain(sql_query, result_df)
+                            assistant_msg['explanation'] = explanation
+                            st.toast("Explanation generated ✅", icon="🧠")
+                        else:
+                            assistant_msg['explanation'] = "**Explanation:** No valid SQL result to summarize."
                         if chart_agent.wants_chart(user_input):
                             chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
                             try:
-                                local_vars = {'result_df': result_df.copy()}
+                                local_vars = {'result_df': result_df.copy() if hasattr(result_df, 'copy') else result_df}
                                 exec(chart_code, {}, local_vars)
                                 fig = local_vars.get('fig', None)
                                 if fig is not None:
@@ -170,7 +175,7 @@ with tabs[0]:
                     elif intent == 'chart':
                         chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
                         try:
-                            local_vars = {'result_df': st.session_state.df.copy()}
+                            local_vars = {'result_df': st.session_state.df.copy() if hasattr(st.session_state.df, 'copy') else st.session_state.df}
                             exec(chart_code, {}, local_vars)
                             fig = local_vars.get('fig', None)
                             assistant_msg['type'] = 'plot'
@@ -188,12 +193,19 @@ with tabs[0]:
                             if msg['role'] == 'assistant' and msg.get('sql'):
                                 sql_query = msg['sql']
                                 break
-                        explanation = explainer_agent.explain(sql_query, st.session_state.df)
-                        assistant_msg['type'] = 'explanation'
-                        assistant_msg['explanation'] = explanation
+                        # Only call explainer if result is valid
+                        result = st.session_state.df
+                        if result is not None and hasattr(result, 'head'):
+                            explanation = explainer_agent.explain(sql_query, result)
+                            assistant_msg['type'] = 'explanation'
+                            assistant_msg['explanation'] = explanation
+                            st.toast("Explanation generated ✅", icon="🧠")
+                        else:
+                            assistant_msg['type'] = 'explanation'
+                            assistant_msg['explanation'] = "**Explanation:** No valid SQL result to summarize."
                     else:
                         assistant_msg['type'] = 'error'
-                        assistant_msg['content'] = str(intent)
+                        assistant_msg['content'] = f"Error: {intent}"
                     # Only append if there is content
                     if not (
                         assistant_msg.get('sql') or
@@ -208,7 +220,11 @@ with tabs[0]:
                         st.session_state.chat_history.append(assistant_msg)
                 except Exception as e:
                     st.session_state.chat_history.append({
-                        'role': 'assistant', 'type': 'error', 'content': f"Error: {e}", 'timestamp': now, 'message_id': msg_id
+                        'role': 'assistant',
+                        'type': 'error',
+                        'timestamp': now,
+                        'message_id': msg_id,
+                        'content': f"Error: {e}"
                     })
                     st.toast(f"Query failed: {e}", icon="❌")
         # Render chat history stack, grouping by message_id (user+assistant)
@@ -251,7 +267,7 @@ with tabs[0]:
                         if assistant_msg.get('explanation'):
                             st.markdown("**Explanation:**")
                             st.markdown(assistant_msg['explanation'])
-                            st.toast("Explanation generated!", icon="💡")
+                            st.toast("Explanation generated ✅", icon="🧠")
                         if assistant_msg.get('chart'):
                             st.markdown("**Chart:**")
                             st.plotly_chart(assistant_msg['chart'], use_container_width=True)
@@ -273,7 +289,7 @@ with tabs[0]:
                         else:
                             st.markdown(f"Explanation")
                             st.markdown(assistant_msg['explanation'])
-                            st.toast("Explanation generated!", icon="💡")
+                            st.toast("Explanation generated ✅", icon="🧠")
                     elif t == 'error':
                         st.markdown(f"Error")
                         st.warning(assistant_msg.get('content', 'Unknown error occurred.'))
