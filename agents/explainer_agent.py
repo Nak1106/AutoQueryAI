@@ -43,7 +43,7 @@ SQL Query:
 {sql}
 
 Result (first rows):
-{str(result)}
+{result.head().to_markdown(index=False) if hasattr(result, 'head') else str(result)}
 
 Explanation:
 """

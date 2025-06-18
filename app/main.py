@@ -152,7 +152,7 @@ with tabs[0]:
                     if intent == 'sql':
                         sql_query = sql_agent.nl_to_sql(user_input, st.session_state.schema, st.session_state.chat_history)
                         result_df = execute_sql(st.session_state.df, sql_query)
-                        explanation = explainer_agent.explain(sql_query, result_df.head())
+                        explanation = explainer_agent.explain(sql_query, result_df)
                         assistant_msg['sql'] = sql_query
                         assistant_msg['result'] = result_df.head()
                         assistant_msg['explanation'] = explanation
@@ -188,14 +188,23 @@ with tabs[0]:
                             if msg['role'] == 'assistant' and msg.get('sql'):
                                 sql_query = msg['sql']
                                 break
-                        explanation = explainer_agent.explain(sql_query, st.session_state.df.head())
+                        explanation = explainer_agent.explain(sql_query, st.session_state.df)
                         assistant_msg['type'] = 'explanation'
                         assistant_msg['explanation'] = explanation
                     else:
                         assistant_msg['type'] = 'error'
                         assistant_msg['content'] = str(intent)
                     # Only append if there is content
-                    if assistant_msg.get('sql') or assistant_msg.get('explanation') or assistant_msg.get('chart') or assistant_msg.get('chart_error') or assistant_msg.get('profile') or assistant_msg.get('content'):
+                    if not (
+                        assistant_msg.get('sql') or
+                        assistant_msg.get('explanation') or
+                        assistant_msg.get('chart') or
+                        assistant_msg.get('chart_error') or
+                        assistant_msg.get('profile') or
+                        assistant_msg.get('content')
+                    ):
+                        pass  # do not add this message to chat history
+                    else:
                         st.session_state.chat_history.append(assistant_msg)
                 except Exception as e:
                     st.session_state.chat_history.append({
