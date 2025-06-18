@@ -155,26 +155,28 @@ with tabs[0]:
                             st.toast("No SQL could be generated for this question.", icon="❌")
                         else:
                             result_df = execute_sql(st.session_state.df, sql_query)
-                            if result_df is None or not hasattr(result_df, 'head') or (hasattr(result_df, 'empty') and result_df.empty):
-                                assistant_msg['explanation'] = "**Explanation:** No meaningful data returned."
-                                st.toast("No result returned for the SQL query.", icon="❌")
-                            else:
-                                assistant_msg['sql'] = sql_query
-                                assistant_msg['result'] = result_df.head() if hasattr(result_df, 'head') else result_df
-                                explanation = explainer_agent.explain(sql_query, result_df)
-                                assistant_msg['explanation'] = explanation
-                                st.toast("Explanation generated ✅", icon="🧠")
-                                if chart_agent.wants_chart(user_input):
-                                    chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
-                                    try:
-                                        local_vars = {'result_df': result_df.copy() if hasattr(result_df, 'copy') else result_df}
-                                        exec(chart_code, {}, local_vars)
-                                        fig = local_vars.get('fig', None)
-                                        if fig is not None:
-                                            assistant_msg['chart'] = fig
-                                    except Exception as e:
-                                        assistant_msg['chart_error'] = str(e)
-                            st.toast("Query complete!", icon="✅")
+                            try:
+                                if result_df is None or not hasattr(result_df, 'empty') or result_df.empty:
+                                    assistant_msg['explanation'] = "**Explanation:** No data returned."
+                                    st.toast("No result returned for the SQL query.", icon="❌")
+                                else:
+                                    assistant_msg['sql'] = sql_query
+                                    assistant_msg['result'] = result_df.head() if hasattr(result_df, 'head') else result_df
+                                    assistant_msg['explanation'] = explainer_agent.explain(sql_query, result_df)
+                                    st.toast("Explanation generated ✅", icon="🧠")
+                                    if chart_agent.wants_chart(user_input):
+                                        chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, result_df)
+                                        try:
+                                            local_vars = {'result_df': result_df.copy() if hasattr(result_df, 'copy') else result_df}
+                                            exec(chart_code, {}, local_vars)
+                                            fig = local_vars.get('fig', None)
+                                            if fig is not None:
+                                                assistant_msg['chart'] = fig
+                                        except Exception as e:
+                                            assistant_msg['chart_error'] = str(e)
+                                    st.toast("Query complete!", icon="✅")
+                            except Exception as e:
+                                assistant_msg['content'] = f"Exception during result handling: {e}"
                     elif intent == 'chart':
                         chart_code = chart_agent.prompt_to_chart_code(user_input, st.session_state.schema, st.session_state.df)
                         try:
@@ -199,17 +201,27 @@ with tabs[0]:
                                 last_sql = msg['sql']
                                 last_result = msg['result']
                                 break
-                        if not last_sql or last_result is None or (hasattr(last_result, 'empty') and last_result.empty):
-                            assistant_msg['explanation'] = "**Explanation:** No meaningful data returned."
-                            st.toast("No previous SQL query and result to explain.", icon="❌")
-                        else:
-                            explanation = explainer_agent.explain(last_sql, last_result)
-                            assistant_msg['type'] = 'explanation'
-                            assistant_msg['explanation'] = explanation
-                            st.toast("Explanation generated ✅", icon="🧠")
+                        try:
+                            if not last_sql or last_result is None or not hasattr(last_result, 'empty') or last_result.empty:
+                                st.session_state["logs"].append("[main.py] Skipped explainer: No recent SQL + result.")
+                            else:
+                                assistant_msg['type'] = 'explanation'
+                                assistant_msg['explanation'] = explainer_agent.explain(last_sql, last_result)
+                                st.toast("Explanation generated ✅", icon="🧠")
+                        except Exception as e:
+                            assistant_msg['content'] = f"Exception during explainer handling: {e}"
                     else:
                         assistant_msg['type'] = 'error'
                         assistant_msg['content'] = f"Error: {intent}"
+                    # Always ensure 'content' exists for error/fallback
+                    if 'content' not in assistant_msg and not (
+                        assistant_msg.get('sql') or
+                        assistant_msg.get('explanation') or
+                        assistant_msg.get('chart') or
+                        assistant_msg.get('chart_error') or
+                        assistant_msg.get('profile')
+                    ):
+                        assistant_msg['content'] = "No output generated."
                     # Only append if there is content
                     if not (
                         assistant_msg.get('sql') or
@@ -219,7 +231,7 @@ with tabs[0]:
                         assistant_msg.get('profile') or
                         assistant_msg.get('content')
                     ):
-                        pass  # do not add this message to chat history
+                        st.session_state["logs"].append("[main.py] Discarded assistant message: No content.")
                     else:
                         st.session_state.chat_history.append(assistant_msg)
                 except Exception as e:
