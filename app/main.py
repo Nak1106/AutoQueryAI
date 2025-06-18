@@ -155,7 +155,8 @@ with tabs[0]:
                             st.toast("No SQL could be generated for this question.", icon="❌")
                         else:
                             result_df = execute_sql(st.session_state.df, sql_query)
-                            if result_df is None or not hasattr(result_df, 'head'):
+                            if result_df is None or not hasattr(result_df, 'head') or (hasattr(result_df, 'empty') and result_df.empty):
+                                assistant_msg['explanation'] = "**Explanation:** No meaningful data returned."
                                 st.toast("No result returned for the SQL query.", icon="❌")
                             else:
                                 assistant_msg['sql'] = sql_query
@@ -198,7 +199,8 @@ with tabs[0]:
                                 last_sql = msg['sql']
                                 last_result = msg['result']
                                 break
-                        if not last_sql or last_result is None:
+                        if not last_sql or last_result is None or (hasattr(last_result, 'empty') and last_result.empty):
+                            assistant_msg['explanation'] = "**Explanation:** No meaningful data returned."
                             st.toast("No previous SQL query and result to explain.", icon="❌")
                         else:
                             explanation = explainer_agent.explain(last_sql, last_result)

@@ -7,15 +7,15 @@ import streamlit as st
 
 class RouterAgent:
     def __init__(self):
-        # Regex patterns for robust routing
-        self.numeric_pattern = re.compile(r"\b(highest|lowest|average|sum|count|max|min|total|fare|tip|distance|amount|mean|median|std|variance|minimum|maximum|number|percent|percentage|ratio|proportion|frequency|most|least|top|bottom)\b", re.IGNORECASE)
+        # Regex patterns for robust, function-based routing
+        self.sql_pattern = re.compile(r"\b(average|highest|lowest|total|sum|max|min|count|grouped|by|which vendor|most common|top|bottom|largest|smallest|mean|median|mode|distribution|breakdown|aggregate|bucket|bin|segment|partition|rank|order by|sort by|group by)\b", re.IGNORECASE)
         self.profiler_pattern = re.compile(r"\b(what is this data|what is this dataset|give me an overview|describe this data|data overview|dataset overview|summary of data|summarize data|profile|data profile|show me the data|what columns|what fields|what tables|what are the columns|what are the fields|what are the tables|schema|structure)\b", re.IGNORECASE)
         self.chart_pattern = re.compile(r"\b(chart|plot|visualize|bar|line|scatter|histogram|pie|draw|graph|visualization)\b", re.IGNORECASE)
 
     def route(self, question: str) -> str:
         q = question.lower()
         st.session_state["logs"].append(f"[RouterAgent] Raw question: {question}")
-        if self.numeric_pattern.search(q):
+        if self.sql_pattern.search(q):
             st.session_state["logs"].append("[RouterAgent] classified intent as: sql")
             return 'sql'
         if self.profiler_pattern.search(q):
